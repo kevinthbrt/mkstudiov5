@@ -12,11 +12,11 @@ function CollectiveCourses() {
   const [selectedMember, setSelectedMember] = useState(null);
   const [isAgendaLoading, setIsAgendaLoading] = useState(true);
 
-  // Définir les fonctions stabilisées avec useCallback
+  // Définir les fonctions stabilisées avec useCallback avant leur utilisation
   const generateCourseSchedule = useCallback((offset) => {
     const weekLabel = offset === 0 ? 'Cette semaine' : 'Semaine suivante';
     setCourseSchedule(allCourseSchedule.filter(c => c.weekLabel === weekLabel));
-  }, [allCourseSchedule]); // Dépendance sur allCourseSchedule
+  }, [allCourseSchedule]);
 
   const getCourseColor = useCallback((name) => {
     switch (name) {
@@ -48,7 +48,7 @@ function CollectiveCourses() {
         .from('sales')
         .select('sale_type, quantity, created_at, is_credit')
         .eq('member_id', memberId)
-        .order('created_at', { ascending: false });
+        .order('created_at', { ascending: false});
 
       if (salesError) throw salesError;
 
@@ -89,6 +89,29 @@ function CollectiveCourses() {
       console.error('Error in fetchSessionBalance:', err);
       setError('Erreur lors du calcul des soldes: ' + (err.message || 'Erreur inconnue'));
       return { individualSessions: 0, duoSessions: 0, collectiveSessions: 0 };
+    }
+  }, []);
+
+  const fetchMembers = useCallback(async () => {
+    try {
+      const { data, error } = await supabase.from('members').select('id, first_name, last_name, email');
+      if (error) throw error;
+      setMembers(data);
+    } catch (err) {
+      setError('Erreur lors de la récupération des membres: ' + err.message);
+    }
+  }, []);
+
+  const fetchBookings = useCallback(async () => {
+    try {
+      const { data, error } = await supabase
+        .from('course_enrollments')
+        .select('id, course_id, member_id, created_at, canceled_at')
+        .order('created_at', { ascending: false });
+      if (error) throw error;
+      setBookings(data);
+    } catch (err) {
+      setError('Erreur lors de la récupération des réservations: ' + err.message);
     }
   }, []);
 
@@ -143,7 +166,7 @@ function CollectiveCourses() {
       setError('Erreur lors de l\'inscription: ' + err.message);
       console.error('Détails de l\'erreur:', err);
     }
-  }, [courseSchedule, getEnrolledMembers, fetchSessionBalance, selectedMember]);
+  }, [courseSchedule, getEnrolledMembers, fetchSessionBalance, selectedMember, isPastCourse, fetchBookings]);
 
   const cancelEnrollment = useCallback(async (bookingId) => {
     const booking = bookings.find(b => b.id === bookingId);
@@ -173,7 +196,7 @@ function CollectiveCourses() {
       setError('Erreur lors de l\'annulation de l\'inscription: ' + err.message);
       console.error('Détails de l\'erreur:', err);
     }
-  }, [bookings, courseSchedule]);
+  }, [bookings, courseSchedule, isPastCourse, fetchBookings]);
 
   const prevWeek = useCallback(() => setCurrentWeekOffset(prev => Math.max(0, prev - 1)), []);
   const nextWeek = useCallback(() => {
@@ -218,29 +241,6 @@ function CollectiveCourses() {
     setAllCourseSchedule(allSchedules);
     setCourseSchedule(allSchedules.filter(c => c.weekLabel === 'Cette semaine')); // Initialiser avec cette semaine
     setIsAgendaLoading(false);
-  }, []);
-
-  const fetchMembers = useCallback(async () => {
-    try {
-      const { data, error } = await supabase.from('members').select('id, first_name, last_name, email');
-      if (error) throw error;
-      setMembers(data);
-    } catch (err) {
-      setError('Erreur lors de la récupération des membres: ' + err.message);
-    }
-  }, []);
-
-  const fetchBookings = useCallback(async () => {
-    try {
-      const { data, error } = await supabase
-        .from('course_enrollments')
-        .select('id, course_id, member_id, created_at, canceled_at')
-        .order('created_at', { ascending: false });
-      if (error) throw error;
-      setBookings(data);
-    } catch (err) {
-      setError('Erreur lors de la récupération des réservations: ' + err.message);
-    }
   }, []);
 
   useEffect(() => {
