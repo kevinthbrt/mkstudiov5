@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { supabase } from './supabaseClient';
 import { useAuth } from './AuthContext';
 import jsPDF from 'jspdf';
@@ -22,8 +22,29 @@ function MemberDashboard() {
   const [isAgendaLoading, setIsAgendaLoading] = useState(true);
   const [currentWeekOffset, setCurrentWeekOffset] = useState(0);
 
-  // Générer l'agenda basé sur la semaine en cours
-  const generateInitialSchedule = () => {
+  // Définir les fonctions stabilisées avec useCallback avant leur utilisation
+  const generateCourseSchedule = useCallback((offset) => {
+    const weekLabel = offset === 0 ? 'Cette semaine' : 'Semaine suivante';
+    setCourseSchedule(allCourseSchedule.filter(c => c.weekLabel === weekLabel));
+  }, [allCourseSchedule]);
+
+  const getCourseColor = useCallback((name) => {
+    switch (name) {
+      case 'Pilates': return 'bg-blue-200';
+      case 'Renfo/Pilates': return 'bg-green-200';
+      case 'Cross-training/Cardio': return 'bg-yellow-200';
+      case 'Renfo/Abdos/Stretching': return 'bg-purple-200';
+      default: return 'bg-gray-200';
+    }
+  }, []);
+
+  const isPastCourse = useCallback((courseDate) => {
+    const currentDate = new Date();
+    currentDate.setHours(0, 0, 0, 0);
+    return new Date(courseDate) < currentDate;
+  }, []);
+
+  const generateInitialSchedule = useCallback(() => {
     const today = new Date();
     const currentWeekStart = new Date(today.setDate(today.getDate() - today.getDay() + (today.getDay() === 0 ? -6 : 1)));
     const weeksToGenerate = 2;
@@ -61,30 +82,9 @@ function MemberDashboard() {
     setAllCourseSchedule(allSchedules);
     setCourseSchedule(allSchedules.filter(c => c.weekLabel === 'Cette semaine')); // Initialiser avec cette semaine
     setIsAgendaLoading(false);
-  };
+  }, []);
 
-  useEffect(() => {
-    console.log('useEffect triggered, user:', user);
-    if (user) {
-      setIsLoading(true);
-      fetchSessionBalance(user.id);
-      fetchInvoices(user.id);
-      fetchBookings(user.id);
-      fetchAllBookingsCount();
-      fetchProfile(user.id);
-      generateInitialSchedule(); // Générer l'agenda au montage
-      setIsLoading(false);
-    } else {
-      console.log('User not available, waiting for authentication...');
-      setIsLoading(false);
-    }
-  }, [user]);
-
-  useEffect(() => {
-    generateCourseSchedule(currentWeekOffset);
-  }, [currentWeekOffset]);
-
-  const fetchSessionBalance = async (memberId) => {
+  const fetchSessionBalance = useCallback(async (memberId) => {
     try {
       console.log('Récupération du solde des séances pour memberId:', memberId);
       const { data: salesData, error: salesError } = await supabase
@@ -146,9 +146,9 @@ function MemberDashboard() {
       console.error('Error in fetchSessionBalance:', err);
       setError('Erreur lors du calcul des soldes: ' + (err.message || 'Erreur inconnue'));
     }
-  };
+  }, []);
 
-  const fetchInvoices = async (memberId) => {
+  const fetchInvoices = useCallback(async (memberId) => {
     try {
       const { data, error } = await supabase
         .from('invoices')
@@ -160,9 +160,9 @@ function MemberDashboard() {
     } catch (err) {
       setError('Erreur lors de la récupération des factures: ' + err.message);
     }
-  };
+  }, []);
 
-  const fetchBookings = async (memberId) => {
+  const fetchBookings = useCallback(async (memberId) => {
     try {
       const { data, error } = await supabase
         .from('course_enrollments')
@@ -174,9 +174,9 @@ function MemberDashboard() {
     } catch (err) {
       setError('Erreur lors de la récupération des réservations: ' + err.message);
     }
-  };
+  }, []);
 
-  const fetchAllBookingsCount = async () => {
+  const fetchAllBookingsCount = useCallback(async () => {
     try {
       const { data, error } = await supabase
         .from('course_enrollments')
@@ -193,9 +193,9 @@ function MemberDashboard() {
       console.error('Error fetching all bookings count:', err);
       setError('Erreur lors de la récupération des réservations globales: ' + err.message);
     }
-  };
+  }, []);
 
-  const fetchProfile = async (memberId) => {
+  const fetchProfile = useCallback(async (memberId) => {
     try {
       const { data, error } = await supabase
         .from('members')
@@ -208,14 +208,9 @@ function MemberDashboard() {
       console.error('Error fetching profile:', err);
       setProfile({ first_name: 'Inconnu', last_name: 'Inconnu' });
     }
-  };
+  }, []);
 
-  const generateCourseSchedule = (offset) => {
-    const weekLabel = offset === 0 ? 'Cette semaine' : 'Semaine suivante';
-    setCourseSchedule(allCourseSchedule.filter(c => c.weekLabel === weekLabel));
-  };
-
-  const handleCourseBooking = async (courseId) => {
+  const handleCourseBooking = useCallback(async (courseId) => {
     const course = courseSchedule.find(c => c.id === courseId);
     if (!course) return;
 
@@ -271,7 +266,7 @@ function MemberDashboard() {
           sale_id: saleId,
           sale_type: 'collective',
           used_at: new Date().toISOString(),
-          enrollment_id: data[0].id, // Lier à l'ID de la réservation
+          enrollment_id: data[0].id,
         });
       if (usageError) throw usageError;
 
@@ -284,9 +279,9 @@ function MemberDashboard() {
       setError('Erreur lors de la réservation: ' + err.message);
       console.error('Détails de l\'erreur:', err);
     }
-  };
+  }, [courseSchedule, collectiveSessions, user?.id, fetchAllBookingsCount, fetchSessionBalance]);
 
-  const handleCancelBooking = async (bookingId) => {
+  const handleCancelBooking = useCallback(async (bookingId) => {
     const booking = bookings.find(b => b.id === bookingId);
     if (!booking) return;
 
@@ -306,7 +301,7 @@ function MemberDashboard() {
       const { error: updateUsageError } = await supabase
         .from('session_usage')
         .update({ is_canceled: true })
-        .eq('enrollment_id', bookingId); // Cibler par l'ID de la réservation
+        .eq('enrollment_id', bookingId);
       if (updateUsageError) throw updateUsageError;
 
       setCollectiveSessions(prev => Math.max(0, prev + 1));
@@ -318,32 +313,16 @@ function MemberDashboard() {
       setError('Erreur lors de l\'annulation: ' + err.message);
       console.error('Détails de l\'erreur:', err);
     }
-  };
+  }, [bookings, courseSchedule, fetchAllBookingsCount, fetchSessionBalance, user?.id]);
 
-  const getCourseColor = (name) => {
-    switch (name) {
-      case 'Pilates': return 'bg-blue-200';
-      case 'Renfo/Pilates': return 'bg-green-200';
-      case 'Cross-training/Cardio': return 'bg-yellow-200';
-      case 'Renfo/Abdos/Stretching': return 'bg-purple-200';
-      default: return 'bg-gray-200';
-    }
-  };
-
-  const isPastCourse = (courseDate) => {
-    const currentDate = new Date();
-    currentDate.setHours(0, 0, 0, 0);
-    return new Date(courseDate) < currentDate;
-  };
-
-  const nextWeek = () => {
+  const nextWeek = useCallback(() => {
     const maxOffset = 1;
     setCurrentWeekOffset(prev => Math.min(prev + 1, maxOffset));
-  };
+  }, []);
 
-  const prevWeek = () => setCurrentWeekOffset(prev => Math.max(0, prev - 1));
+  const prevWeek = useCallback(() => setCurrentWeekOffset(prev => Math.max(0, prev - 1)), []);
 
-  const generateInvoicePDF = async (invoice) => {
+  const generateInvoicePDF = useCallback(async (invoice) => {
     try {
       const doc = new jsPDF();
       doc.setFontSize(20);
@@ -379,7 +358,28 @@ function MemberDashboard() {
     } catch (err) {
       setError(`Erreur lors de la génération de la facture: ${err.message}`);
     }
-  };
+  }, [profile, user?.email]);
+
+  useEffect(() => {
+    console.log('useEffect triggered, user:', user);
+    if (user) {
+      setIsLoading(true);
+      fetchSessionBalance(user.id);
+      fetchInvoices(user.id);
+      fetchBookings(user.id);
+      fetchAllBookingsCount();
+      fetchProfile(user.id);
+      generateInitialSchedule();
+      setIsLoading(false);
+    } else {
+      console.log('User not available, waiting for authentication...');
+      setIsLoading(false);
+    }
+  }, [user, fetchSessionBalance, fetchInvoices, fetchBookings, fetchAllBookingsCount, fetchProfile, generateInitialSchedule]);
+
+  useEffect(() => {
+    generateCourseSchedule(currentWeekOffset);
+  }, [currentWeekOffset, generateCourseSchedule]);
 
   return (
     <div className="p-6 bg-gray-900 text-white min-h-screen">

@@ -140,7 +140,7 @@ function Admin() {
       }
 
       console.log('Envoi de l\'invitation...');
-      const { data, error: inviteError } = await supabaseAdmin.auth.admin.inviteUserByEmail(email, {
+      const { error: inviteError } = await supabaseAdmin.auth.admin.inviteUserByEmail(email, {
         data: { role: 'adherent' },
         redirectTo: `${window.location.origin}/set-password`,
       });

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { supabase } from './supabaseClient';
 
 function CollectiveCourses() {
@@ -12,85 +12,13 @@ function CollectiveCourses() {
   const [selectedMember, setSelectedMember] = useState(null);
   const [isAgendaLoading, setIsAgendaLoading] = useState(true);
 
-  // Générer l'agenda basé sur la semaine en cours
-  const generateInitialSchedule = () => {
-    const today = new Date();
-    const currentWeekStart = new Date(today.setDate(today.getDate() - today.getDay() + (today.getDay() === 0 ? -6 : 1)));
-    const weeksToGenerate = 2;
-    const allSchedules = [];
-
-    for (let offset = 0; offset < weeksToGenerate; offset++) {
-      const weekStart = new Date(currentWeekStart);
-      weekStart.setDate(currentWeekStart.getDate() + offset * 7);
-      const schedule = [
-        { day: 'Lundi', time: '19:40', name: 'Renfo/Pilates', maxSlots: 9 },
-        { day: 'Mardi', time: '17:40-18:40', name: 'Pilates', maxSlots: 9 },
-        { day: 'Mardi', time: '18:40-19:40', name: 'Pilates', maxSlots: 9 },
-        { day: 'Mercredi', time: '19:00-20:00', name: 'Cross-training/Cardio', maxSlots: 9 },
-        { day: 'Jeudi', time: '19:40-20:40', name: 'Pilates', maxSlots: 9 },
-        { day: 'Samedi', time: '10:30-11:30', name: 'Renfo/Abdos/Stretching', maxSlots: 9 },
-      ];
-
-      const weekSchedule = schedule.map(course => {
-        const [startTime] = course.time.split('-').map(t => t.replace('h', ''));
-        const date = new Date(weekStart);
-        const dayIndex = ['Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi'].indexOf(course.day);
-        date.setDate(date.getDate() + dayIndex);
-        const [hours, minutes] = startTime.split(':').map(Number);
-        date.setHours(hours, minutes, 0, 0);
-        return {
-          ...course,
-          date: date,
-          weekLabel: offset === 0 ? 'Cette semaine' : 'Semaine suivante',
-          id: `${date.toISOString().split('T')[0]}-${course.time}-${course.name}-${offset}`,
-        };
-      });
-      allSchedules.push(...weekSchedule);
-    }
-    setAllCourseSchedule(allSchedules);
-    setCourseSchedule(allSchedules.filter(c => c.weekLabel === 'Cette semaine')); // Initialiser avec cette semaine
-    setIsAgendaLoading(false);
-  };
-
-  useEffect(() => {
-    generateInitialSchedule(); // Générer l'agenda au montage
-    fetchMembers();
-    fetchBookings();
-  }, []);
-
-  useEffect(() => {
-    generateCourseSchedule(currentWeekOffset);
-  }, [currentWeekOffset]);
-
-  const fetchMembers = async () => {
-    try {
-      const { data, error } = await supabase.from('members').select('id, first_name, last_name, email');
-      if (error) throw error;
-      setMembers(data);
-    } catch (err) {
-      setError('Erreur lors de la récupération des membres: ' + err.message);
-    }
-  };
-
-  const fetchBookings = async () => {
-    try {
-      const { data, error } = await supabase
-        .from('course_enrollments')
-        .select('id, course_id, member_id, created_at, canceled_at')
-        .order('created_at', { ascending: false });
-      if (error) throw error;
-      setBookings(data);
-    } catch (err) {
-      setError('Erreur lors de la récupération des réservations: ' + err.message);
-    }
-  };
-
-  const generateCourseSchedule = (offset) => {
+  // Définir les fonctions stabilisées avec useCallback
+  const generateCourseSchedule = useCallback((offset) => {
     const weekLabel = offset === 0 ? 'Cette semaine' : 'Semaine suivante';
     setCourseSchedule(allCourseSchedule.filter(c => c.weekLabel === weekLabel));
-  };
+  }, [allCourseSchedule]); // Dépendance sur allCourseSchedule
 
-  const getCourseColor = (name) => {
+  const getCourseColor = useCallback((name) => {
     switch (name) {
       case 'Pilates': return 'bg-blue-200';
       case 'Renfo/Pilates': return 'bg-green-200';
@@ -98,23 +26,23 @@ function CollectiveCourses() {
       case 'Renfo/Abdos/Stretching': return 'bg-purple-200';
       default: return 'bg-gray-200';
     }
-  };
+  }, []);
 
-  const isPastCourse = (courseDate) => {
+  const isPastCourse = useCallback((courseDate) => {
     const currentDate = new Date();
     currentDate.setHours(0, 0, 0, 0);
     return new Date(courseDate) < currentDate;
-  };
+  }, []);
 
-  const getEnrolledMembers = (courseId) => {
+  const getEnrolledMembers = useCallback((courseId) => {
     const enrolled = bookings.filter(b => b.course_id === courseId && !b.canceled_at).map(b => {
       const member = members.find(m => m.id === b.member_id);
       return member ? { id: b.member_id, name: `${member.first_name} ${member.last_name}` } : { id: null, name: 'Inconnu' };
     });
     return enrolled;
-  };
+  }, [bookings, members]);
 
-  const fetchSessionBalance = async (memberId) => {
+  const fetchSessionBalance = useCallback(async (memberId) => {
     try {
       const { data: salesData, error: salesError } = await supabase
         .from('sales')
@@ -162,9 +90,9 @@ function CollectiveCourses() {
       setError('Erreur lors du calcul des soldes: ' + (err.message || 'Erreur inconnue'));
       return { individualSessions: 0, duoSessions: 0, collectiveSessions: 0 };
     }
-  };
+  }, []);
 
-  const enrollMember = async (courseId) => {
+  const enrollMember = useCallback(async (courseId) => {
     if (isPastCourse(courseSchedule.find(c => c.id === courseId).date)) {
       setError('Impossible de s\'inscrire à un cours passé.');
       return;
@@ -215,9 +143,9 @@ function CollectiveCourses() {
       setError('Erreur lors de l\'inscription: ' + err.message);
       console.error('Détails de l\'erreur:', err);
     }
-  };
+  }, [courseSchedule, getEnrolledMembers, fetchSessionBalance, selectedMember]);
 
-  const cancelEnrollment = async (bookingId) => {
+  const cancelEnrollment = useCallback(async (bookingId) => {
     const booking = bookings.find(b => b.id === bookingId);
     if (!booking) return;
 
@@ -245,13 +173,85 @@ function CollectiveCourses() {
       setError('Erreur lors de l\'annulation de l\'inscription: ' + err.message);
       console.error('Détails de l\'erreur:', err);
     }
-  };
+  }, [bookings, courseSchedule]);
 
-  const prevWeek = () => setCurrentWeekOffset(prev => Math.max(0, prev - 1));
-  const nextWeek = () => {
+  const prevWeek = useCallback(() => setCurrentWeekOffset(prev => Math.max(0, prev - 1)), []);
+  const nextWeek = useCallback(() => {
     const maxOffset = 1;
     setCurrentWeekOffset(prev => Math.min(prev + 1, maxOffset));
-  };
+  }, []);
+
+  const generateInitialSchedule = useCallback(() => {
+    const today = new Date();
+    const currentWeekStart = new Date(today.setDate(today.getDate() - today.getDay() + (today.getDay() === 0 ? -6 : 1)));
+    const weeksToGenerate = 2;
+    const allSchedules = [];
+
+    for (let offset = 0; offset < weeksToGenerate; offset++) {
+      const weekStart = new Date(currentWeekStart);
+      weekStart.setDate(currentWeekStart.getDate() + offset * 7);
+      const schedule = [
+        { day: 'Lundi', time: '19:40', name: 'Renfo/Pilates', maxSlots: 9 },
+        { day: 'Mardi', time: '17:40-18:40', name: 'Pilates', maxSlots: 9 },
+        { day: 'Mardi', time: '18:40-19:40', name: 'Pilates', maxSlots: 9 },
+        { day: 'Mercredi', time: '19:00-20:00', name: 'Cross-training/Cardio', maxSlots: 9 },
+        { day: 'Jeudi', time: '19:40-20:40', name: 'Pilates', maxSlots: 9 },
+        { day: 'Samedi', time: '10:30-11:30', name: 'Renfo/Abdos/Stretching', maxSlots: 9 },
+      ];
+
+      const weekSchedule = schedule.map(course => {
+        const [startTime] = course.time.split('-').map(t => t.replace('h', ''));
+        const date = new Date(weekStart);
+        const dayIndex = ['Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi'].indexOf(course.day);
+        date.setDate(date.getDate() + dayIndex);
+        const [hours, minutes] = startTime.split(':').map(Number);
+        date.setHours(hours, minutes, 0, 0);
+        return {
+          ...course,
+          date: date,
+          weekLabel: offset === 0 ? 'Cette semaine' : 'Semaine suivante',
+          id: `${date.toISOString().split('T')[0]}-${course.time}-${course.name}-${offset}`,
+        };
+      });
+      allSchedules.push(...weekSchedule);
+    }
+    setAllCourseSchedule(allSchedules);
+    setCourseSchedule(allSchedules.filter(c => c.weekLabel === 'Cette semaine')); // Initialiser avec cette semaine
+    setIsAgendaLoading(false);
+  }, []);
+
+  const fetchMembers = useCallback(async () => {
+    try {
+      const { data, error } = await supabase.from('members').select('id, first_name, last_name, email');
+      if (error) throw error;
+      setMembers(data);
+    } catch (err) {
+      setError('Erreur lors de la récupération des membres: ' + err.message);
+    }
+  }, []);
+
+  const fetchBookings = useCallback(async () => {
+    try {
+      const { data, error } = await supabase
+        .from('course_enrollments')
+        .select('id, course_id, member_id, created_at, canceled_at')
+        .order('created_at', { ascending: false });
+      if (error) throw error;
+      setBookings(data);
+    } catch (err) {
+      setError('Erreur lors de la récupération des réservations: ' + err.message);
+    }
+  }, []);
+
+  useEffect(() => {
+    generateInitialSchedule();
+    fetchMembers();
+    fetchBookings();
+  }, [generateInitialSchedule, fetchMembers, fetchBookings]);
+
+  useEffect(() => {
+    generateCourseSchedule(currentWeekOffset);
+  }, [currentWeekOffset, generateCourseSchedule]);
 
   return (
     <div className="p-6 bg-gray-900 text-white min-h-screen">
