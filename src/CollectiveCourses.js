@@ -281,7 +281,7 @@ function CollectiveCourses() {
               Semaine suivante
             </button>
           </div>
-          <div className="grid grid-cols-6 gap-2">
+          <div className="grid grid-cols-1 md:grid-cols-6 gap-2">
             {['Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi'].map(day => {
               const dayCourses = courseSchedule.filter(c => c.day === day);
               return (

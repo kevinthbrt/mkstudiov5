@@ -414,7 +414,7 @@ function Admin() {
             {selectedMember && (
               <div className="mb-6">
                 <h2 className="text-xl font-semibold mb-4 text-yellow-500 border-b border-yellow-500 pb-1">Solde de {members.find(m => m.id === selectedMember)?.first_name} {members.find(m => m.id === selectedMember)?.last_name}</h2>
-                <div className="grid grid-cols-3 gap-4 mb-4">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
                   <div className="p-4 bg-yellow-400 rounded-lg text-center shadow-md">
                     <h3 className="text-lg font-semibold text-gray-100">Individuelles</h3>
                     <p className="text-2xl text-yellow-700">{memberBalance.individualSessions}</p>

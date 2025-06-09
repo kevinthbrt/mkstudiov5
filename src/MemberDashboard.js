@@ -393,7 +393,7 @@ function MemberDashboard() {
           {error && <p className="text-yellow-500 mb-4">{error}</p>}
           {success && <p className="text-yellow-500 mb-4">{success}</p>}
           <div className="space-y-8">
-            <div className="grid grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <div className="p-4 bg-yellow-400 rounded-lg text-center shadow-md hover:shadow-lg transition border border-gray-900">
                 <h3 className="text-lg font-semibold text-gray-100">Individuelles</h3>
                 <p className="text-2xl text-yellow-700">{individualSessions}</p>
@@ -458,7 +458,7 @@ function MemberDashboard() {
                       Semaine suivante
                     </button>
                   </div>
-                  <div className="grid grid-cols-6 gap-2">
+                  <div className="grid grid-cols-1 md:grid-cols-6 gap-2">
                     {['Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi'].map(day => {
                       const dayCourses = courseSchedule.filter(c => c.day === day);
                       return (
