@@ -21,12 +21,24 @@ function MemberDashboard() {
   const [isLoading, setIsLoading] = useState(true);
   const [isAgendaLoading, setIsAgendaLoading] = useState(true);
   const [currentWeekOffset, setCurrentWeekOffset] = useState(0);
+  const [weekDates, setWeekDates] = useState([]);
 
-  // Définir les fonctions stabilisées avec useCallback avant leur utilisation
-  const generateCourseSchedule = useCallback((offset) => {
-    const weekLabel = offset === 0 ? 'Cette semaine' : 'Semaine suivante';
-    setCourseSchedule(allCourseSchedule.filter(c => c.weekLabel === weekLabel));
-  }, [allCourseSchedule]);
+  const isSameWeek = useCallback((date1, date2) => {
+    const normalizeDate = (date) => {
+      const d = new Date(date);
+      d.setHours(0, 0, 0, 0);
+      return d;
+    };
+    const startOfWeek = (date) => {
+      const d = normalizeDate(date);
+      d.setDate(d.getDate() - d.getDay() + (d.getDay() === 0 ? -6 : 1));
+      return d;
+    };
+    const week1 = startOfWeek(date1);
+    const week2 = startOfWeek(date2);
+    console.log('isSameWeek comparison:', { date1: normalizeDate(date1), date2: normalizeDate(date2), week1, week2 });
+    return week1.getTime() === week2.getTime();
+  }, []);
 
   const getCourseColor = useCallback((name) => {
     switch (name) {
@@ -41,58 +53,126 @@ function MemberDashboard() {
   const isPastCourse = useCallback((courseDate) => {
     const currentDate = new Date();
     currentDate.setHours(0, 0, 0, 0);
-    return new Date(courseDate) < currentDate;
+    const isPast = new Date(courseDate) < currentDate;
+    console.log('isPastCourse:', { courseDate, currentDate, isPast });
+    return isPast;
   }, []);
 
-  const generateInitialSchedule = useCallback(() => {
+  const fetchRegularCourses = useCallback(async (startDate, endDate) => {
+    try {
+      const { data, error } = await supabase
+        .from('courses')
+        .select('id, day, time, name, max_slots, date, is_bookable, is_deactivated, is_deleted')
+        .eq('is_deleted', false)
+        .eq('is_deactivated', false)
+        .gte('date', startDate.toISOString())
+        .lte('date', endDate.toISOString());
+      if (error) throw error;
+      console.log('Raw regular courses fetched:', data);
+      const mappedCourses = data.map(course => ({
+        ...course,
+        date: new Date(course.date),
+        maxSlots: course.max_slots ?? 9,
+        weekLabel: isSameWeek(new Date(course.date), new Date()) ? 'Cette semaine' : 'Semaine suivante',
+        isExceptional: false,
+        is_bookable: course.is_bookable !== false,
+      }));
+      console.log('Mapped regular courses:', mappedCourses);
+      return mappedCourses;
+    } catch (err) {
+      console.error('Error in fetchRegularCourses:', err);
+      setError('Erreur lors de la récupération des cours réguliers: ' + err.message);
+      return [];
+    }
+  }, [isSameWeek]);
+
+  const fetchExceptionalCourses = useCallback(async (startDate, endDate) => {
+    try {
+      const { data, error } = await supabase
+        .from('exceptional_courses')
+        .select('id, date, time, name, max_slots, is_bookable, is_deactivated, is_deleted')
+        .eq('is_deleted', false)
+        .eq('is_deactivated', false)
+        .gte('date', startDate.toISOString())
+        .lte('date', endDate.toISOString());
+      if (error) throw error;
+      console.log('Exceptional courses fetched:', data);
+      return data.map(course => ({
+        id: course.id,
+        date: new Date(course.date),
+        time: course.time,
+        name: course.name,
+        maxSlots: course.max_slots ?? 9,
+        day: new Date(course.date).toLocaleDateString('fr-FR', { weekday: 'long' }).replace(/^\w/, c => c.toUpperCase()),
+        weekLabel: isSameWeek(new Date(course.date), new Date()) ? 'Cette semaine' : 'Semaine suivante',
+        isExceptional: true,
+        is_bookable: course.is_bookable !== false,
+      }));
+    } catch (err) {
+      console.error('Error in fetchExceptionalCourses:', err);
+      setError('Erreur lors de la récupération des cours exceptionnels: ' + err.message);
+      return [];
+    }
+  }, [isSameWeek]);
+
+  const generateWeekDates = useCallback((startDate, offset) => {
+    const days = ['Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi'];
+    const dates = [];
+    const weekStart = new Date(startDate);
+    weekStart.setDate(startDate.getDate() + offset * 7);
+    for (let i = 0; i < 6; i++) {
+      const date = new Date(weekStart);
+      date.setDate(weekStart.getDate() + i);
+      dates.push({ day: days[i], date });
+    }
+    console.log('Generated week dates:', dates);
+    return dates;
+  }, []);
+
+  const generateInitialSchedule = useCallback(async () => {
+    setIsAgendaLoading(true);
     const today = new Date();
-    const currentWeekStart = new Date(today.setDate(today.getDate() - today.getDay() + (today.getDay() === 0 ? -6 : 1)));
+    const currentWeekStart = new Date(today);
+    currentWeekStart.setHours(0, 0, 0, 0);
+    currentWeekStart.setDate(today.getDate() - today.getDay() + (today.getDay() === 0 ? -6 : 1));
     const weeksToGenerate = 2;
+    const endDate = new Date(currentWeekStart);
+    endDate.setDate(currentWeekStart.getDate() + weeksToGenerate * 7 - 1);
+
+    console.log('Generating schedule:', { currentWeekStart, endDate });
+
     const allSchedules = [];
 
-    for (let offset = 0; offset < weeksToGenerate; offset++) {
-      const weekStart = new Date(currentWeekStart);
-      weekStart.setDate(currentWeekStart.getDate() + offset * 7);
-      const schedule = [
-        { day: 'Lundi', time: '19:40', name: 'Renfo/Pilates', maxSlots: 9 },
-        { day: 'Mardi', time: '17:40-18:40', name: 'Pilates', maxSlots: 9 },
-        { day: 'Mardi', time: '18:40-19:40', name: 'Pilates', maxSlots: 9 },
-        { day: 'Mercredi', time: '19:00-20:00', name: 'Cross-training/Cardio', maxSlots: 9 },
-        { day: 'Jeudi', time: '19:40-20:40', name: 'Pilates', maxSlots: 9 },
-        { day: 'Samedi', time: '10:30-11:30', name: 'Renfo/Abdos/Stretching', maxSlots: 9 },
-      ];
+    const regularCourses = await fetchRegularCourses(currentWeekStart, endDate);
+    const exceptionalCourses = await fetchExceptionalCourses(currentWeekStart, endDate);
 
-      const weekSchedule = schedule.map(course => {
-        const [startTime] = course.time.split('-').map(t => t.replace('h', ''));
-        const date = new Date(weekStart);
-        const dayIndex = ['Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi'].indexOf(course.day);
-        date.setDate(date.getDate() + dayIndex);
-        const [hours, minutes] = startTime.split(':').map(Number);
-        date.setHours(hours, minutes, 0, 0);
-        return {
-          ...course,
-          date: date,
-          weekLabel: offset === 0 ? 'Cette semaine' : 'Semaine suivante',
-          id: `${date.toISOString().split('T')[0]}-${course.time}-${course.name}-${offset}`,
-        };
-      });
-      allSchedules.push(...weekSchedule);
-    }
+    allSchedules.push(...regularCourses, ...exceptionalCourses);
+
     console.log('Generated all course schedule:', allSchedules);
     setAllCourseSchedule(allSchedules);
-    setCourseSchedule(allSchedules.filter(c => c.weekLabel === 'Cette semaine')); // Initialiser avec cette semaine
+    setCourseSchedule(allSchedules.filter(c => c.weekLabel === 'Cette semaine'));
+    setWeekDates(generateWeekDates(currentWeekStart, 0));
     setIsAgendaLoading(false);
-  }, []);
+  }, [fetchRegularCourses, fetchExceptionalCourses, generateWeekDates]);
+
+  const generateCourseSchedule = useCallback((offset) => {
+    const weekLabel = offset === 0 ? 'Cette semaine' : 'Semaine suivante';
+    const filteredSchedule = allCourseSchedule.filter(c => c.weekLabel === weekLabel);
+    console.log('Filtered schedule for week:', weekLabel, filteredSchedule);
+    setCourseSchedule(filteredSchedule);
+    const currentWeekStart = new Date();
+    currentWeekStart.setHours(0, 0, 0, 0);
+    currentWeekStart.setDate(currentWeekStart.getDate() - currentWeekStart.getDay() + (currentWeekStart.getDay() === 0 ? -6 : 1));
+    setWeekDates(generateWeekDates(currentWeekStart, offset));
+  }, [allCourseSchedule, generateWeekDates]);
 
   const fetchSessionBalance = useCallback(async (memberId) => {
     try {
-      console.log('Récupération du solde des séances pour memberId:', memberId);
       const { data: salesData, error: salesError } = await supabase
         .from('sales')
         .select('sale_type, quantity, created_at, is_credit')
         .eq('member_id', memberId)
         .order('created_at', { ascending: false });
-
       if (salesError) throw salesError;
 
       const { data: usageData, error: usageError } = await supabase
@@ -101,8 +181,6 @@ function MemberDashboard() {
         .eq('member_id', memberId)
         .eq('is_canceled', false);
       if (usageError) throw usageError;
-
-      console.log('Usage data after cancel:', usageData);
 
       let individual = 0, duo = 0, collective = 0;
       salesData.forEach(sale => {
@@ -166,7 +244,7 @@ function MemberDashboard() {
     try {
       const { data, error } = await supabase
         .from('course_enrollments')
-        .select('id, course_id, created_at, canceled_at')
+        .select('id, course_id, exceptional_course_id, is_exceptional, created_at, canceled_at')
         .eq('member_id', memberId)
         .is('canceled_at', null);
       if (error) throw error;
@@ -180,11 +258,12 @@ function MemberDashboard() {
     try {
       const { data, error } = await supabase
         .from('course_enrollments')
-        .select('course_id')
+        .select('course_id, exceptional_course_id, is_exceptional')
         .is('canceled_at', null);
       if (error) throw error;
       const counts = data.reduce((acc, item) => {
-        acc[item.course_id] = (acc[item.course_id] || 0) + 1;
+        const key = item.is_exceptional ? item.exceptional_course_id : item.course_id;
+        acc[key] = (acc[key] || 0) + 1;
         return acc;
       }, {});
       setAllBookingsCount(counts);
@@ -210,9 +289,17 @@ function MemberDashboard() {
     }
   }, []);
 
-  const handleCourseBooking = useCallback(async (courseId) => {
+  const handleCourseBooking = useCallback(async (courseId, isExceptional) => {
     const course = courseSchedule.find(c => c.id === courseId);
-    if (!course) return;
+    if (!course) {
+      setError('Cours introuvable.');
+      return;
+    }
+
+    if (!course.is_bookable) {
+      setError('Ce cours n\'est pas réservable.');
+      return;
+    }
 
     const currentDate = new Date();
     const courseDate = new Date(course.date);
@@ -221,12 +308,16 @@ function MemberDashboard() {
       return;
     }
 
+    const bookingsKey = isExceptional ? 'exceptional_course_id' : 'course_id';
     const { data: existingBookings, error: fetchError } = await supabase
       .from('course_enrollments')
-      .select('course_id')
-      .eq('course_id', courseId)
+      .select('id')
+      .eq(bookingsKey, courseId)
       .is('canceled_at', null);
-    if (fetchError) throw fetchError;
+    if (fetchError) {
+      setError('Erreur lors de la vérification des réservations: ' + fetchError.message);
+      return;
+    }
 
     if (existingBookings.length >= course.maxSlots) {
       setError('Le cours est complet (9 inscriptions maximum).');
@@ -250,13 +341,18 @@ function MemberDashboard() {
 
       const saleId = salesData.length > 0 ? salesData[0].id : null;
 
+      const enrollmentData = {
+        member_id: user.id,
+        course_id: isExceptional ? null : courseId,
+        exceptional_course_id: isExceptional ? courseId : null,
+        is_exceptional: isExceptional,
+        created_at: new Date().toISOString(),
+      };
+
       const { data, error: enrollError } = await supabase
         .from('course_enrollments')
-        .insert({
-          member_id: user.id,
-          course_id: courseId,
-          created_at: new Date().toISOString(),
-        }).select();
+        .insert(enrollmentData)
+        .select();
       if (enrollError) throw enrollError;
 
       const { error: usageError } = await supabase
@@ -271,21 +367,34 @@ function MemberDashboard() {
       if (usageError) throw usageError;
 
       setCollectiveSessions(prev => Math.max(0, prev - 1));
-      setBookings(prev => [...prev, { id: data[0].id, course_id: courseId, created_at: new Date().toISOString() }]);
+      setBookings(prev => [...prev, {
+        id: data[0].id,
+        course_id: isExceptional ? null : courseId,
+        exceptional_course_id: isExceptional ? courseId : null,
+        is_exceptional: isExceptional,
+        created_at: new Date().toISOString(),
+      }]);
       await fetchAllBookingsCount();
+      await fetchBookings(user.id);
       setSuccess('Réservation effectuée avec succès !');
       await fetchSessionBalance(user.id);
     } catch (err) {
       setError('Erreur lors de la réservation: ' + err.message);
       console.error('Détails de l\'erreur:', err);
     }
-  }, [courseSchedule, collectiveSessions, user?.id, fetchAllBookingsCount, fetchSessionBalance]);
+  }, [courseSchedule, collectiveSessions, user?.id, fetchAllBookingsCount, fetchBookings, fetchSessionBalance]);
 
   const handleCancelBooking = useCallback(async (bookingId) => {
     const booking = bookings.find(b => b.id === bookingId);
-    if (!booking) return;
+    if (!booking) {
+      setError('Réservation introuvable.');
+      return;
+    }
 
-    const course = courseSchedule.find(c => c.id === booking.course_id);
+    const course = courseSchedule.find(c =>
+      (booking.is_exceptional && c.id === booking.exceptional_course_id) ||
+      (!booking.is_exceptional && c.id === booking.course_id)
+    );
     if (!course || new Date(course.date) < new Date()) {
       setError('Impossible d\'annuler un cours passé.');
       return;
@@ -307,13 +416,14 @@ function MemberDashboard() {
       setCollectiveSessions(prev => Math.max(0, prev + 1));
       setBookings(prev => prev.filter(b => b.id !== bookingId));
       await fetchAllBookingsCount();
+      await fetchBookings(user.id);
       setSuccess('Réservation annulée avec succès !');
       await fetchSessionBalance(user.id);
     } catch (err) {
       setError('Erreur lors de l\'annulation: ' + err.message);
       console.error('Détails de l\'erreur:', err);
     }
-  }, [bookings, courseSchedule, fetchAllBookingsCount, fetchSessionBalance, user?.id]);
+  }, [bookings, courseSchedule, fetchAllBookingsCount, fetchBookings, user?.id, fetchSessionBalance]);
 
   const nextWeek = useCallback(() => {
     const maxOffset = 1;
@@ -361,7 +471,6 @@ function MemberDashboard() {
   }, [profile, user?.email]);
 
   useEffect(() => {
-    console.log('useEffect triggered, user:', user);
     if (user) {
       setIsLoading(true);
       fetchSessionBalance(user.id);
@@ -413,13 +522,16 @@ function MemberDashboard() {
                 <ul className="list-disc pl-5">
                   {bookings
                     .map(booking => {
-                      const course = allCourseSchedule.find(c => c.id === booking.course_id);
+                      const course = allCourseSchedule.find(c =>
+                        (booking.is_exceptional && c.id === booking.exceptional_course_id) ||
+                        (!booking.is_exceptional && c.id === booking.course_id)
+                      );
                       return { ...booking, course };
                     })
                     .filter(b => b.course && !isPastCourse(b.course.date))
                     .map((b, index) => (
                       <li key={index} className={`p-2 mb-2 rounded-lg ${getCourseColor(b.course.name)} text-gray-900 border border-gray-900`}>
-                        {b.course.name} - {b.course.time} le {new Date(b.course.date).toLocaleDateString('fr-FR')}
+                        {b.course.name} {b.course.isExceptional ? '(Exceptionnel)' : ''} - {b.course.time} le {new Date(b.course.date).toLocaleDateString('fr-FR')}
                         <button
                           onClick={() => handleCancelBooking(b.id)}
                           className="ml-2 bg-gradient-to-r from-red-600 to-red-400 text-white p-1 rounded-lg hover:from-red-700 hover:to-red-500 transition text-xs"
@@ -461,47 +573,61 @@ function MemberDashboard() {
                   <div className="grid grid-cols-1 md:grid-cols-6 gap-2">
                     {['Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi'].map(day => {
                       const dayCourses = courseSchedule.filter(c => c.day === day);
+                      const dayDate = weekDates.find(d => d.day === day)?.date;
                       return (
                         <div key={day} className="flex-1">
                           <h4 className="text-md font-medium text-yellow-500 mb-2">
-                            {day} {dayCourses[0]?.date.toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' })}
+                            {day} {dayDate?.toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' })}
                           </h4>
-                          {dayCourses.map(course => {
-                            const isBooked = bookings.some(b => b.course_id === course.id);
-                            const isPast = isPastCourse(course.date);
-                            const colorClass = getCourseColor(course.name);
-                            const bookingCount = allBookingsCount[course.id] || 0;
-                            return (
-                              <div
-                                key={course.id}
-                                className={`p-2 mb-2 rounded-lg ${colorClass} ${isPast ? 'opacity-50 cursor-not-allowed' : ''} shadow-md hover:shadow-lg transition border border-gray-900`}
-                                style={{ maxWidth: '100%', minWidth: 0 }}
-                              >
-                                <p className="text-sm text-yellow-500" style={{ overflowWrap: 'break-word', maxWidth: '100%' }}>
-                                  {course.time} - {course.name} ({bookingCount}/{course.maxSlots})
-                                </p>
-                                {!isPast && !isBooked && collectiveSessions > 0 && (
-                                  <button
-                                    onClick={() => handleCourseBooking(course.id)}
-                                    className="mt-1 bg-gradient-to-r from-yellow-500 to-yellow-300 text-white p-1 rounded-lg hover:from-yellow-600 hover:to-yellow-400 transition text-xs"
-                                    style={{ overflowWrap: 'break-word', maxWidth: '100%' }}
-                                  >
-                                    Réserver
-                                  </button>
-                                )}
-                                {isBooked && (
-                                  <button
-                                    onClick={() => handleCancelBooking(bookings.find(b => b.course_id === course.id).id)}
-                                    className="mt-1 bg-gradient-to-r from-red-600 to-red-400 text-white p-1 rounded-lg hover:from-red-700 hover:to-red-500 transition ml-2 text-xs"
-                                    style={{ overflowWrap: 'break-word', maxWidth: '100%' }}
-                                  >
-                                    Annuler
-                                  </button>
-                                )}
-                                {isPast && <p className="text-xs text-yellow-500" style={{ overflowWrap: 'break-word', maxWidth: '100%' }}>Cours passé</p>}
-                              </div>
-                            );
-                          })}
+                          {dayCourses.length > 0 ? (
+                            dayCourses.map(course => {
+                              const isBooked = bookings.some(b =>
+                                (b.is_exceptional && b.exceptional_course_id === course.id) ||
+                                (!b.is_exceptional && b.course_id === course.id)
+                              );
+                              const isPast = isPastCourse(course.date);
+                              const colorClass = getCourseColor(course.name);
+                              const bookingCount = allBookingsCount[course.id] || 0;
+                              return (
+                                <div
+                                  key={course.id}
+                                  className={`p-2 mb-2 rounded-lg ${colorClass} ${isPast || !course.is_bookable ? 'opacity-50 cursor-not-allowed' : ''} shadow-md hover:shadow-lg transition border border-gray-900`}
+                                  style={{ maxWidth: '100%', minWidth: 0 }}
+                                >
+                                  <p className="text-sm text-yellow-500" style={{ overflowWrap: 'break-word', maxWidth: '100%' }}>
+                                    {course.time} - {course.name} {course.isExceptional ? '(Exceptionnel)' : ''} ({bookingCount}/{course.maxSlots})
+                                  </p>
+                                  {!isPast && !isBooked && collectiveSessions > 0 && course.is_bookable && (
+                                    <button
+                                      onClick={() => handleCourseBooking(course.id, course.isExceptional)}
+                                      className="mt-1 bg-gradient-to-r from-yellow-500 to-yellow-300 text-white p-1 rounded-lg hover:from-yellow-600 hover:to-yellow-400 transition text-xs"
+                                      style={{ overflowWrap: 'break-word', maxWidth: '100%' }}
+                                    >
+                                      Réserver
+                                    </button>
+                                  )}
+                                  {isBooked && (
+                                    <button
+                                      onClick={() => handleCancelBooking(bookings.find(b =>
+                                        (b.is_exceptional && b.exceptional_course_id === course.id) ||
+                                        (!b.is_exceptional && b.course_id === course.id)
+                                      ).id)}
+                                      className="mt-1 bg-gradient-to-r from-red-600 to-red-400 text-white p-1 rounded-lg hover:from-red-700 hover:to-red-500 transition text-xs ml-2"
+                                      style={{ overflowWrap: 'break-word', maxWidth: '100%' }}
+                                    >
+                                      Annuler
+                                    </button>
+                                  )}
+                                  {isPast && <p className="text-xs text-yellow-500 mt-2" style={{ overflowWrap: 'break-word', maxWidth: '100%' }}>Cours passé</p>}
+                                  {!isPast && !isBooked && course.is_bookable === false && (
+                                    <p className="text-xs text-yellow-500 mt-2" style={{ overflowWrap: 'break-word', maxWidth: '100%' }}>Cours non réservable</p>
+                                  )}
+                                </div>
+                              );
+                            })
+                          ) : (
+                            <p className="text-sm text-yellow-500">Aucun cours prévu ce jour.</p>
+                          )}
                         </div>
                       );
                     })}
